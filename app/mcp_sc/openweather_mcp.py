@@ -1,15 +1,23 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastmcp import FastMCP
 import httpx
 
-from app.config import settings
-
-
 mcp = FastMCP(name="Weather MCP")
-OPENWEATHER_API_KEY = settings.openweather_api_key
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
 
 
 async def _get_weather_data(endpoint: str, city: str) -> dict:
+    if not OPENWEATHER_API_KEY:
+        return {
+            "error": {
+                "message": "OPENWEATHER_API_KEY is not configured for the weather MCP server"
+            }
+        }
+
     async with httpx.AsyncClient() as client:
         response = await client.get(
             f"{OPENWEATHER_BASE_URL}/{endpoint}",
@@ -66,3 +74,12 @@ async def get_forecast(city: str) -> dict:
 
 if __name__ == "__main__":
     mcp.run()
+
+
+
+
+
+
+
+
+# fastmcp dev .\openweather_mcp.py

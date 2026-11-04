@@ -40,5 +40,4 @@ Thumbs.db
 app/frontend/travel_plans/
 aviationstack-mcp/
 
-pyproject.toml
 src/ 
