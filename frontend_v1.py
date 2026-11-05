@@ -6,11 +6,15 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from app.agent.main import graph_config, run_graph, supervisor_agent
-from mcp_client import get_tools
+from app.guardrails.bedrock_guardrail import BedrockGuardrail
+from app.mcp_sc.mcp_client import get_tools
 
 
 st.set_page_config(page_title="TravelBuddy", layout="wide")
 st.title("TravelBuddy")
+
+if "guardrail" not in st.session_state:
+    st.session_state.guardrail = BedrockGuardrail()
 
 if "mcp_tools_ready" not in st.session_state:
     with st.spinner("Connecting to MCP servers..."):
@@ -47,27 +51,56 @@ if st.button("Create Draft Plan", type="primary"):
     if not query.strip():
         st.warning("Enter a travel request first.")
     else:
-        with st.spinner("Supervisor is selecting agents..."):
-            supervisor_plan = asyncio.run(supervisor_agent(query))
+        try:
+            # STEP 1: Guardrail check
+            with st.spinner("Checking query with Bedrock Guardrails..."):
+                guardrail_result = st.session_state.guardrail.check(
+                    query=query,
+                    source="INPUT",
+                )
 
-        with st.spinner("Agents are planning..."):
-            result = run_graph(
-                {
-                    "messages": [HumanMessage(content=query)],
-                    "user_id": user_id,
-                    "user_query": query,
-                    "selected_agents": supervisor_plan["selected_agents"],
-                    "trip_constraints": supervisor_plan["trip_constraints"],
-                    "supervisor_reasoning": supervisor_plan[
-                        "supervisor_reasoning"
-                    ],
-                    "llm_calls": supervisor_plan.get("llm_calls", 0),
-                },
-                config,
-            )
+            # STEP 2: Stop if blocked
+            if guardrail_result["blocked"]:
+                st.session_state.pop("latest_result", None)
+                st.session_state.waiting_for_approval = False
+                fallback_message = (
+                    guardrail_result["outputs"][0]["text"]
+                    if guardrail_result["outputs"]
+                    else "Your request was blocked by the TravelBuddy safety policy."
+                )
+                st.error(fallback_message)
+            else:
+                # Use anonymized query if PII was detected.
+                checked_query = guardrail_result["checked_query"]
 
-        st.session_state.latest_result = result
-        st.session_state.waiting_for_approval = "__interrupt__" in result
+                # STEP 3: Supervisor
+                with st.spinner("Supervisor is selecting agents..."):
+                    supervisor_plan = asyncio.run(
+                        supervisor_agent(checked_query)
+                    )
+
+                with st.spinner("Agents are planning..."):
+                    result = run_graph(
+                        {
+                            "messages": [HumanMessage(content=checked_query)],
+                            "user_id": user_id,
+                            "user_query": checked_query,
+                            "selected_agents": supervisor_plan["selected_agents"],
+                            "trip_constraints": supervisor_plan["trip_constraints"],
+                            "supervisor_reasoning": supervisor_plan[
+                                "supervisor_reasoning"
+                            ],
+                            "llm_calls": supervisor_plan.get("llm_calls", 0),
+                        },
+                        config,
+                    )
+
+                st.session_state.latest_result = result
+                st.session_state.waiting_for_approval = "__interrupt__" in result
+        except Exception as exc:
+            st.session_state.pop("latest_result", None)
+            st.session_state.waiting_for_approval = False
+            st.error(f"Unable to process your request safely: {exc}")
 
 
 result = st.session_state.get("latest_result")

@@ -25,7 +25,7 @@ from app.agent.prompts import (
 )
 from app.agent.schema import ApprovalFeedback, SupervisorOutput, TravelState
 from app.config import settings
-from mcp_client import (
+from app.mcp_sc.mcp_client import (
     current_weather,
     forecast,
     list_airlines,
